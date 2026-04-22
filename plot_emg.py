@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 from collections import Counter
 
 # =========================
-# 1. Загрузка данных
+# 1. Upload data
 # =========================
 df = pd.read_csv("emg_for_fistmoveset.csv", delimiter='\t')
 
@@ -12,40 +12,40 @@ print("Columns:")
 print(df.columns.tolist())
 
 # =========================
-# 2. Время
+# 2. Time
 # =========================
 start_time = df["Timestamp"].iloc[0]
 df["time_sec"] = df["Timestamp"] - start_time
 
 # =========================
-# 3. Берём EMG каналы
+# 3. Take EMG channels
 # =========================
 emg_cols = [f"FilteredChannel{i}" for i in range(1, 9)]
 emg_data = df[emg_cols].values
 
 # =========================
-# 4. Считаем мощность сигнала
+# 4. Calculating signal strength
 # =========================
 signal_power = np.mean(np.abs(emg_data), axis=1)
 
 # =========================
-# 5. Убираем слишком большие пики (опционально, но полезно)
+# 5. Removing any peaks that are too large (optional, but helpful)
 # =========================
 signal_power = np.clip(signal_power, 0, 500)
 
 # =========================
-# 6. Сглаживание (moving average)
+# 6. Smoothing (moving average)
 # =========================
-window_size = 50  # ~0.1 сек при 500 Hz
+window_size = 50  # ~0.1 sec at 500 Hz
 signal_power_smooth = pd.Series(signal_power).rolling(window=window_size).mean()
 
 # =========================
-# 7. Выбор threshold
+# 7. Choose threshold
 # =========================
-THRESHOLD = 100  # попробуй 60–120 если не идеально
+THRESHOLD = 100
 
 # =========================
-# 8. Классификация
+# 8. Classification
 # =========================
 labels = []
 
@@ -60,21 +60,21 @@ for val in signal_power_smooth:
 df["predicted_label"] = labels
 
 # =========================
-# 9. Статистика
+# 9. Statistic
 # =========================
 print("\nSignal stats:")
 print("Mean:", np.nanmean(signal_power_smooth))
 print("Max:", np.nanmax(signal_power_smooth))
 
 # =========================
-# 10. Графики
+# 10. Graphics
 # =========================
 plt.figure(figsize=(12, 6))
 
-# raw сигнал (прозрачный)
+# raw signal (transparent)
 plt.plot(df["time_sec"], signal_power, alpha=0.3, label="Raw Signal")
 
-# сглаженный
+# smoothed
 plt.plot(df["time_sec"], signal_power_smooth, linewidth=2, label="Smoothed Signal")
 
 # threshold
@@ -89,7 +89,7 @@ plt.tight_layout()
 plt.show()
 
 # =========================
-# 11. Визуализация классов
+# 11. Visualization of classes
 # =========================
 plt.figure(figsize=(12, 4))
 
@@ -104,7 +104,7 @@ plt.grid(True, alpha=0.3)
 plt.show()
 
 # =========================
-# 12. Пример вывода
+# 12. output examples
 # =========================
 print("\nSample predictions:")
 print(df[["time_sec", "predicted_label"]].head(50))

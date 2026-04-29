@@ -1,0 +1,66 @@
+# Виртуальное окружение
+emg_env/
+emg_env_windows/
+venv/
+env/
+ENV/
+
+# Python кэш
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+*.ipynb
+
+# Файлы с данными (CSV с записями)
+*.csv
+!*.csv  # если хочешь коммитить маленькие csv - убери эту строку
+
+# Результаты экспорта
+emg_classified_results.csv
+emg_analyzed.csv
+labeled_data.csv
+gesture_log.txt
+
+# Модели и параметры
+*.pkl
+*.h5
+*.joblib
+emg_params.json
+scaler.pkl
+X_features.npy
+y_labels.npy
+
+# Логи
+*.log
+*.txt
+
+# Графики и изображения
+*.png
+*.jpg
+*.jpeg
+*.pdf
+*.svg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# ROS (если появится в папке)
+devel/
+build/
+install/
+*.pyc
+
+# Временные файлы
+temp/
+tmp/
+*.tmp

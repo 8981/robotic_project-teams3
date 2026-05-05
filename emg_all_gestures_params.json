@@ -1,0 +1,14 @@
+{
+    "thresholds": {
+        "FIST": 33.18588141514863,
+        "UP_DOWN": 9.052286041967081,
+        "LEFT_RIGHT": 10.934184873973397
+    },
+    "sampling_rate": 498.268448360838,
+    "window_size": 50,
+    "gestures": [
+        "FIST",
+        "UP_DOWN",
+        "LEFT_RIGHT"
+    ]
+}

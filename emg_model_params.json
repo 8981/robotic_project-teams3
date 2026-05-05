@@ -1,0 +1,15 @@
+{
+    "window_size": 50,
+    "step": 25,
+    "n_features": 43,
+    "n_classes": 6,
+    "classes": [
+        "DOWN",
+        "FIST",
+        "LEFT",
+        "REST",
+        "RIGHT",
+        "UP"
+    ],
+    "accuracy": 0.5853960396039604
+}

@@ -1,245 +1,163 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-from collections import Counter
 from scipy.signal import find_peaks
-
-# =========================
-# 1. Upload data
-# =========================
-df = pd.read_csv("emg_for_fistmoveset.csv", delimiter='\t')
-
-# =========================
-# 2. Time
-# =========================
-start_time = df["Timestamp"].iloc[0]
-df["time_sec"] = df["Timestamp"] - start_time
-
-# =========================
-# 3. Take EMG channels
-# =========================
-emg_cols = [f"FilteredChannel{i}" for i in range(1, 9)]
-emg_data = df[emg_cols].values
-
-# =========================
-# 4. Calculating signal strength (RMS лучше чем MAV)
-# =========================
-signal_power = np.sqrt(np.mean(emg_data**2, axis=1))
-
-# =========================
-# 5. Remove outliers
-# =========================
-signal_power = np.clip(signal_power, 0, np.percentile(signal_power, 99))
-
-# =========================
-# 6. Smoothing
-# =========================
-window_size = 50
-signal_power_smooth = pd.Series(signal_power).rolling(window=window_size, center=True).mean()
-signal_power_smooth = signal_power_smooth.bfill().ffill()
-
-# =========================
-# 7. Automatic threshold selection (improved)
-# =========================
-# Method 1: Based on histogram peaks
-hist, bins = np.histogram(signal_power_smooth, bins=50)
-peak_indices, _ = find_peaks(hist)
-if len(peak_indices) >= 2:
-    # Find two pics (REST и FIST)
-    peak_values = bins[peak_indices]
-    peak_heights = hist[peak_indices]
-    # Sorting by heigh
-    sorted_idx = np.argsort(peak_heights)[::-1]
-    rest_peak = min(peak_values[sorted_idx[0]], peak_values[sorted_idx[1]])
-    fist_peak = max(peak_values[sorted_idx[0]], peak_values[sorted_idx[1]])
-    THRESHOLD = (rest_peak + fist_peak) / 2
-    print(f"Threshold from peaks: REST={rest_peak:.2f}, FIST={fist_peak:.2f}, TH={THRESHOLD:.2f}")
-else:
-    # Method 2: Percentile-based fallback
-    THRESHOLD = np.percentile(signal_power_smooth, 70)
-    print(f"Threshold from percentile 70: {THRESHOLD:.2f}")
-
-# Method 3: Alternative - use mean + std
-# THRESHOLD = np.nanmean(signal_power_smooth) + np.nanstd(signal_power_smooth)
-
-# =========================
-# 8. Classification
-# =========================
-labels = []
-for val in signal_power_smooth:
-    if val > THRESHOLD:
-        labels.append("FIST")
-    else:
-        labels.append("REST")
-
-df["predicted_label"] = labels
-
-# Добавляем задержку (опционально) - убираем короткие всплески
-min_fist_duration = 10  # минимальная длина FIST в сэмплах (~0.02 сек)
-fist_streak = 0
-for i in range(len(labels)):
-    if labels[i] == "FIST":
-        fist_streak += 1
-    else:
-        if 0 < fist_streak < min_fist_duration:
-            # Слишком короткое сжатие - меняем на REST
-            for j in range(i-fist_streak, i):
-                labels[j] = "REST"
-        fist_streak = 0
-
-df["predicted_label_filtered"] = labels
-
-# Сохраняем параметры для реального времени
 import json
-params = {
-    'threshold': float(THRESHOLD),
-    'window_size': window_size,
-    'sampling_rate': float(len(df) / df["time_sec"].max()),
-    'min_fist_duration': min_fist_duration
+
+# =========================
+# 1. Загрузка всех файлов
+# =========================
+files = {
+    'FIST': "emg_for_fistmoveset.csv",
+    'UP_DOWN': "emg_for_fist_up_down.csv",
+    'LEFT_RIGHT': "emg_for_fist_left_right.csv"
 }
-with open('emg_params.json', 'w') as f:
-    json.dump(params, f, indent=4)
-print(f"✓ Parameters saved to 'emg_params.json'")
+
+# Функция обработки одного файла
+def process_emg_file(filepath, gesture_name):
+    print(f"\n{'='*50}")
+    print(f"Processing: {gesture_name}")
+    print(f"{'='*50}")
+    
+    # Загрузка
+    df = pd.read_csv(filepath, delimiter='\t')
+    
+    # Время
+    start_time = df["Timestamp"].iloc[0]
+    df["time_sec"] = df["Timestamp"] - start_time
+    
+    # EMG каналы
+    emg_cols = [f"FilteredChannel{i}" for i in range(1, 9)]
+    emg_data = df[emg_cols].values
+    
+    # RMS сигнал
+    signal_rms = np.sqrt(np.mean(emg_data**2, axis=1))
+    
+    # Обрезаем выбросы
+    signal_rms = np.clip(signal_rms, 0, np.percentile(signal_rms, 99))
+    
+    # Сглаживание
+    window_size = 50
+    signal_smooth = pd.Series(signal_rms).rolling(window=window_size, center=True).mean()
+    signal_smooth = signal_smooth.bfill().ffill().values
+    
+    return {
+        'df': df,
+        'time': df["time_sec"].values,
+        'signal': signal_smooth,
+        'duration': df["time_sec"].max()
+    }
 
 # =========================
-# 9. Statistics
+# 2. Обработка всех файлов
 # =========================
-print("\nSignal stats:")
-print(f"Mean: {np.nanmean(signal_power_smooth):.2f}")
-print(f"Std: {np.nanstd(signal_power_smooth):.2f}")
-print(f"Max: {np.nanmax(signal_power_smooth):.2f}")
-print(f"Min: {np.nanmin(signal_power_smooth):.2f}")
-print(f"Threshold: {THRESHOLD:.2f}")
-
-# Statistics for onditions
-rest_values = signal_power_smooth[np.array(labels) == "REST"]
-fist_values = signal_power_smooth[np.array(labels) == "FIST"]
-print(f"\nREST: mean={np.mean(rest_values):.2f}, std={np.std(rest_values):.2f}")
-print(f"FIST: mean={np.mean(fist_values):.2f}, std={np.std(fist_values):.2f}")
-print(f"Separation ratio: {np.mean(fist_values)/np.mean(rest_values):.2f}x")
+data = {}
+for name, path in files.items():
+    try:
+        data[name] = process_emg_file(path, name)
+    except FileNotFoundError:
+        print(f"Файл не найден: {path}")
 
 # =========================
-# 10. Graphics - Improved
+# 3. Поиск порогов для каждого жеста
 # =========================
-fig, axes = plt.subplots(2, 1, figsize=(14, 8))
+def find_threshold(signal):
+    hist, bins = np.histogram(signal, bins=50)
+    peak_indices, _ = find_peaks(hist)
+    if len(peak_indices) >= 2:
+        peak_values = bins[peak_indices]
+        peak_heights = hist[peak_indices]
+        sorted_idx = np.argsort(peak_heights)[::-1]
+        rest_peak = min(peak_values[sorted_idx[0]], peak_values[sorted_idx[1]])
+        active_peak = max(peak_values[sorted_idx[0]], peak_values[sorted_idx[1]])
+        return (rest_peak + active_peak) / 2
+    else:
+        return np.percentile(signal, 70)
 
-# Plot 1: Signal with threshold
-ax1 = axes[0]
-ax1.plot(df["time_sec"], signal_power, alpha=0.3, label="Raw Signal", linewidth=0.5)
-ax1.plot(df["time_sec"], signal_power_smooth, linewidth=2, label="Smoothed Signal", color='orange')
-ax1.axhline(y=THRESHOLD, color='r', linestyle='--', linewidth=2, label=f"Threshold ({THRESHOLD:.1f})")
+print("\n=== ПОРОГИ ДЛЯ КАЖДОГО ЖЕСТА ===")
+thresholds = {}
+for name, d in data.items():
+    th = find_threshold(d['signal'])
+    thresholds[name] = th
+    print(f"{name}: {th:.2f}")
 
-# Закрашиваем области FIST
-for i, label in enumerate(labels):
-    if label == "FIST":
-        ax1.axvspan(df["time_sec"].iloc[i], df["time_sec"].iloc[i+1] if i+1 < len(df) else df["time_sec"].iloc[i], 
-                   alpha=0.3, color='red', linewidth=0)
+# =========================
+# 4. Сравнение всех сигналов на одном графике
+# =========================
+plt.figure(figsize=(14, 8))
 
-ax1.set_xlabel("Time (seconds)")
-ax1.set_ylabel("Signal Power (RMS)")
-ax1.set_title("EMG Signal with Automatic Threshold Detection")
-ax1.legend()
-ax1.grid(True, alpha=0.3)
+colors = {'FIST': 'red', 'UP_DOWN': 'blue', 'LEFT_RIGHT': 'green'}
 
-# Plot 2: Classification result
-ax2 = axes[1]
-colors = ['red' if l == "FIST" else 'green' for l in labels]
-ax2.scatter(df["time_sec"], signal_power_smooth, c=colors, s=5, alpha=0.6)
-ax2.set_xlabel("Time (seconds)")
-ax2.set_ylabel("Smoothed Signal")
-ax2.set_title("Classification: RED = FIST, GREEN = REST")
-ax2.grid(True, alpha=0.3)
+for name, d in data.items():
+    plt.plot(d['time'], d['signal'], color=colors[name], alpha=0.7, linewidth=1, label=name)
 
+plt.xlabel("Time (seconds)")
+plt.ylabel("EMG Signal (RMS)")
+plt.title("Сравнение EMG сигналов для разных жестов")
+plt.legend()
+plt.grid(True, alpha=0.3)
 plt.tight_layout()
 plt.show()
 
-# Plot 3: Distribution histogram
-fig2, axes2 = plt.subplots(1, 2, figsize=(14, 5))
-
-# Гистограмма распределений
-ax_hist = axes2[0]
-ax_hist.hist(rest_values, bins=30, alpha=0.5, label='REST', color='green', density=True)
-ax_hist.hist(fist_values, bins=30, alpha=0.5, label='FIST', color='red', density=True)
-ax_hist.axvline(x=THRESHOLD, color='blue', linestyle='--', linewidth=2, label=f'Threshold ({THRESHOLD:.1f})')
-ax_hist.set_xlabel('Signal Power (RMS)')
-ax_hist.set_ylabel('Density')
-ax_hist.set_title('Signal Distribution by State')
-ax_hist.legend()
-ax_hist.grid(True, alpha=0.3)
-
-# Box plot
-ax_box = axes2[1]
-bp = ax_box.boxplot([rest_values, fist_values], labels=['REST', 'FIST'], patch_artist=True)
-bp['boxes'][0].set_facecolor('lightgreen')
-bp['boxes'][1].set_facecolor('lightcoral')
-ax_box.set_ylabel('Signal Power (RMS)')
-ax_box.set_title('Box Plot Comparison')
-ax_box.grid(True, alpha=0.3)
-
-plt.tight_layout()
-plt.show()
+# =========================
+# 5. Статистика по каждому жесту
+# =========================
+print("\n=== СТАТИСТИКА ПО КАЖДОМУ ФАЙЛУ ===")
+for name, d in data.items():
+    signal = d['signal']
+    print(f"\n{name}:")
+    print(f"  Длительность: {d['duration']:.1f} сек")
+    print(f"  Среднее: {np.mean(signal):.2f}")
+    print(f"  Максимум: {np.max(signal):.2f}")
+    print(f"  Медиана: {np.median(signal):.2f}")
+    print(f"  Порог: {thresholds[name]:.2f}")
 
 # =========================
-# 11. Additional analysis
+# 6. Анализ по периодам (5 сек REST, 5 сек жест)
 # =========================
-# Подсчет переходов и длительностей
-changes = sum(1 for i in range(1, len(labels)) if labels[i] != labels[i-1])
-print(f"\nNumber of state transitions: {changes}")
-
-# Длительности FIST периодов
-fist_periods = []
-current = 0
-for label in labels:
-    if label == "FIST":
-        current += 1
-    elif current > 0:
-        fist_periods.append(current)
-        current = 0
-if current > 0:
-    fist_periods.append(current)
-
-if fist_periods:
-    sampling_rate = len(df) / df["time_sec"].max()
-    fist_durations_sec = [p / sampling_rate for p in fist_periods]
-    print(f"FIST periods: {len(fist_periods)}")
-    print(f"Average FIST duration: {np.mean(fist_durations_sec):.2f} seconds")
-    print(f"Min/Max FIST duration: {min(fist_durations_sec):.2f}/{max(fist_durations_sec):.2f} sec")
-
-# =========================
-# 12. Output
-# =========================
-print("\nUnique labels:", set(labels))
-print("Label counts:", Counter(labels))
-
-# =========================
-# 13. Real-time simulation function
-# =========================
-def simulate_real_time(speed=1.0):
-    """
-    Симулирует реальное время проигрывая сигнал
-    speed: 1.0 = реальная скорость, >1 быстрее, <1 медленнее
-    """
-    print("\n=== REAL-TIME SIMULATION ===")
-    print(f"Speed: {speed}x")
-    print("Press Ctrl+C to stop...\n")
+def analyze_cycles(signal, sampling_rate, pattern_name):
+    """Анализирует циклы по 5 секунд"""
+    cycle_duration = 5  # секунд
+    samples_per_cycle = int(cycle_duration * sampling_rate)
     
-    import time
-    start_time = time.time()
-    last_gesture = None
+    # Разбиваем на циклы
+    n_cycles = len(signal) // samples_per_cycle
     
-    for i, val in enumerate(signal_power_smooth):
-        current_time = df["time_sec"].iloc[i]
-        gesture = "FIST" if val > THRESHOLD else "REST"
-        
-        if gesture != last_gesture:
-            elapsed = time.time() - start_time
-            print(f"[{elapsed:.1f}s] {gesture} (signal: {val:.1f})")
-            last_gesture = gesture
-        
-        # Ждем согласно скорости
-        if i < len(signal_power_smooth) - 1:
-            delta = (df["time_sec"].iloc[i+1] - df["time_sec"].iloc[i]) / speed
-            time.sleep(delta)
+    cycle_means = []
+    for i in range(n_cycles):
+        segment = signal[i*samples_per_cycle:(i+1)*samples_per_cycle]
+        cycle_means.append(np.mean(segment))
+    
+    return cycle_means
 
-# Раскомментируй чтобы запустить симуляцию:
-# simulate_real_time(speed=1.0)
+print("\n=== АНАЛИЗ ПО ЦИКЛАМ (5 СЕКУНД) ===")
+for name, d in data.items():
+    sampling_rate = len(d['signal']) / d['duration']
+    cycles = analyze_cycles(d['signal'], sampling_rate, name)
+    
+    # Разделяем на REST и активные циклы
+    # Паттерн: REST -> ACTIVE -> REST -> ACTIVE -> REST
+    if len(cycles) >= 5:
+        rest_cycles = [cycles[0], cycles[2], cycles[4]]  # четные индексы
+        active_cycles = [cycles[1], cycles[3]]            # нечетные индексы
+        
+        print(f"\n{name}:")
+        print(f"  REST (покой): среднее = {np.mean(rest_cycles):.2f} ± {np.std(rest_cycles):.2f}")
+        print(f"  ACTIVE (жест): среднее = {np.mean(active_cycles):.2f} ± {np.std(active_cycles):.2f}")
+        print(f"  Отношение: {np.mean(active_cycles)/np.mean(rest_cycles):.2f}x")
+
+# =========================
+# 7. Сохранение параметров для ML
+# =========================
+params_all = {
+    'thresholds': thresholds,
+    'sampling_rate': len(data['FIST']['signal']) / data['FIST']['duration'] if 'FIST' in data else 500,
+    'window_size': 50,
+    'gestures': list(data.keys())
+}
+
+with open('emg_all_gestures_params.json', 'w') as f:
+    json.dump(params_all, f, indent=4)
+
+print(f"\n✓ Параметры сохранены в 'emg_all_gestures_params.json'")
+print(f"  Обнаружены жесты: {params_all['gestures']}")
